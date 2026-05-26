@@ -68,9 +68,24 @@ class AzureApiImpl(conf: Map[String, String]) extends Api(conf) {
     }
   }
 
-  override def genMetricsKvStore(tableBaseName: String): KVStore = null
+  override def genMetricsKvStore(tableBaseName: String): KVStore = genKvStore
 
-  override def genEnhancedStatsKvStore(tableBaseName: String): KVStore = null
+  override def genEnhancedStatsKvStore(tableBaseName: String): KVStore = {
+    Option(sharedEnhancedStatsKvStore.get()) match {
+      case Some(existingStore) =>
+        existingStore
+      case None =>
+        enhancedStatsKvStoreLock.synchronized {
+          Option(sharedEnhancedStatsKvStore.get()) match {
+            case Some(existingStore) => existingStore
+            case None =>
+              val newStore = genKvStore
+              sharedEnhancedStatsKvStore.set(newStore)
+              newStore
+          }
+        }
+    }
+  }
 
   override def streamDecoder(groupByServingInfoParsed: GroupByServingInfoParsed): SerDe =
     new AvroSerDe(AvroConversions.fromChrononSchema(groupByServingInfoParsed.streamChrononSchema))
