@@ -763,6 +763,10 @@ class Fetcher(val kvStore: KVStore,
       .getGroupByServingInfo(groupByName)
       .flatMap { servingInfo =>
         if (!servingInfo.groupBy.metaData.online) {
+          // online status comes from the conf embedded in the TTL-cached serving info. Refresh (async) so a
+          // newer upload that flipped it online is picked up on a subsequent request rather than waiting out
+          // the full TTL - same pattern as buildJoinCodec's refresh-on-failure.
+          metadataStore.getGroupByServingInfo.refresh(groupByName)
           Failure(
             new IllegalArgumentException(
               s"GroupBy $groupByName is not online. Fetcher schema is only available for online GroupBys. " +
