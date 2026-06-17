@@ -267,7 +267,7 @@ class BigTableKVStoreImpl(dataClient: BigtableDataClient,
   }
 
   override def list(request: ListRequest): Future[ListResponse] = {
-    logger.info(s"Performing list for ${request.dataset}")
+    logger.debug(s"Performing list for ${request.dataset}")
 
     val listLimit = request.props.get(ListLimit) match {
       case Some(value: Int)    => value
@@ -305,7 +305,7 @@ class BigTableKVStoreImpl(dataClient: BigtableDataClient,
         val startRowKey = buildRowKey(s"$listEntityType/".getBytes(Charset.forName("UTF-8")), request.dataset)
         query.range(ByteStringRange.unbounded().startOpen(ByteString.copyFrom(startRowKey)))
       case _ =>
-        logger.info("No start key or list entity type provided. Starting from the beginning")
+        logger.debug("No start key or list entity type provided. Starting from the beginning")
     }
 
     val startTs = System.currentTimeMillis()
@@ -546,18 +546,21 @@ class BigTableKVStoreImpl(dataClient: BigtableDataClient,
       // we append the timestamp to the jobID as BigQuery doesn't allow us to re-run the same job
       // Pin the job to GCP_LOCATION so it lands in the same region as the BQ reservation
       // assigned to the project. Without an explicit location, the BQ client won't specify any location
-      val jobId = conf
-        .get(GcpApiImpl.GcpLocation)
-        .fold({
-          logger.warn(s"GCP_LOCATION is not set, starting job without specifying location.")
-          JobId.of(adminClient.getProjectId, s"export_${sourceOfflineTable.sanitize}_to_bigtable_${partition}_$startTs")
-        })(bqLocation =>
-          JobId
-            .newBuilder()
-            .setProject(adminClient.getProjectId)
-            .setLocation(bqLocation)
-            .setJob(s"export_${sourceOfflineTable.sanitize}_to_bigtable_${partition}_$startTs")
-            .build())
+      val jobId = {
+        GcpApiImpl
+          .getOptional(GcpApiImpl.GcpLocation, conf)
+          .fold({
+            logger.warn(s"GCP_LOCATION is not set, starting job without specifying location.")
+            JobId.of(adminClient.getProjectId,
+                     s"export_${sourceOfflineTable.sanitize}_to_bigtable_${partition}_$startTs")
+          })(bqLocation =>
+            JobId
+              .newBuilder()
+              .setProject(adminClient.getProjectId)
+              .setLocation(bqLocation)
+              .setJob(s"export_${sourceOfflineTable.sanitize}_to_bigtable_${partition}_$startTs")
+              .build())
+      }
       val job: Job = bigQueryClient.create(JobInfo.newBuilder(queryConfig).setJobId(jobId).build())
       logger.info(s"Export job started with Id: $jobId and link: ${job.getSelfLink}")
       val retryConfig =
